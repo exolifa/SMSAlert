@@ -1,0 +1,23 @@
+{
+    "devname" : "smsalert001",
+    "alerttopic": "alert",
+    "wifi":{
+            "ssid": "VOO-012485",
+            "uid": "",
+            "pw": "JHQKBGRD"
+    },
+    "mqtt":{
+        "server": "192.168.0.7",
+        "user": "exolifa",
+        "pw": "shaman",
+        "cmd":"cmd/smsalert001"
+    },
+    "gsm":{
+        "pincode": "1111",
+        "destinataire": "+32483207089"
+    },
+    "ftp":{
+        "ftpuser":"esp8266",
+        "ftppw":"esp8266"
+    }
+}

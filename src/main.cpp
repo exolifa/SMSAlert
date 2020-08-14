@@ -8,6 +8,12 @@
 */
 #include <Arduino.h>
 #include "Adafruit_FONA.h"
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include "SPIFFS.h"
+#include "ESP8266FtpServer.h"
+
 
 // definition des pins internes pour le modem SIM800L
 
@@ -21,8 +27,26 @@
 HardwareSerial *sim800lSerial = &Serial1;
 // initialisation de la librairie FONA - client GSM
 Adafruit_FONA sim800l = Adafruit_FONA(SIM800L_PWRKEY);
+struct Config {
+  char serverName[15] ;
+  char alerttopic[35] ;
+  char wifissid [20];
+  char wifiuid[10];
+  char wifipw[25] ;
+  char mqttserver[15];
+  char mqttuser[15];
+  char mqttpw[15];
+  char mqttcmd[35];
+  char ftpuser [15];
+  char ftppw [15];  
+  char pincode[5];
+  char destination[32];
+};
+Config config; 
+
 // definition du code pin 
-#define SIM800L_PIN  1111
+char SIM800L_PIN[5]  ="1111";
+char destination[32] ="+32483207089";
 //zone pour lire le code imei de la carte SIM
 char imei[16] = {0};
 
@@ -34,11 +58,167 @@ int interval = 1000;
 char sim800lNotificationBuffer[64];          //for notifications from the FONA
 char smsBuffer[250];
 boolean ledState = false;
-
 String smsString = "";
+//client WIFI,NTP & mqtt definition
+WiFiClient espClient;
+PubSubClient client(espClient);
+FtpServer ftpSrv;
+
+void setup_wifi() {
+ // WiFi.hostname( "smsalert");
+  delay(100);
+  // We start by connecting to a WiFi network
+ // String ssid = wifissid;
+ // String pw = wifipw;
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.print(config.wifissid);
+  Serial.print(" with pw=");
+  Serial.println(config.wifipw);
+  WiFi.begin(config.wifissid,config.wifipw);
+  delay(100);
+  WiFi.printDiag(Serial);
+  while (WiFi.status() != WL_CONNECTED) {
+   delay(10000);  
+   Serial.print(WiFi.status());
+  }
+ // Serial.println("WiFi connected");
+  Serial.print("IP address: ");
+  Serial.print(WiFi.localIP());
+  Serial.print(" Gateway: ");
+  Serial.print(WiFi.gatewayIP());
+  Serial.print(" netmask: ");
+  Serial.println(WiFi.subnetMask());
+}
+/*
+    Connecting to MQTT server
+*/
+void reconnect() {
+  // Loop until we're reconnected to mqtt server
+  while (!client.connected()) {
+    if (client.connect(config.serverName, config.mqttuser, config.mqttpw)) {
+      // subscribing to mqtt commands topics if needed
+      Serial.println("mqtt subscribing to :");
+      Serial.println(config.mqttcmd);
+      client.subscribe(config.mqttcmd);
+      client.subscribe(config.alerttopic);
+      Serial.println("mqqt connected");
+    } else {
+      Serial.print("failed mqtt with ");
+      Serial.println(client.state());
+      delay(5000);
+    }
+  }
+}
+/*
+   Loading the parameters from the spiffs config.json file
+*/
+bool loadConfig() {
+
+  DynamicJsonDocument cfg (3500);
+  File configFile = SPIFFS.open("/config.json", "r");
+  if (!configFile) {
+    Serial.println("Failed to open config file");
+    return false;
+  }
+
+  size_t size = configFile.size();
+  Serial.print("config size=");
+  Serial.println(size);
+  if (size > 3500) {
+    Serial.println("Config file size is too large");
+    return false;
+  }
+
+  // Allocate a buffer to store contents of the file.
+  std::unique_ptr<char[]> buf(new char[size]);
+  configFile.readBytes(buf.get(), size);
+  auto error = deserializeJson(cfg, buf.get());
+  if (error) {
+    Serial.print("Failed to parse config file");
+    Serial.println(error.c_str());
+    return false;
+  }
+  strlcpy(config.serverName,                  // <- destination
+          cfg["devname"] | "DEV001",  // <- source
+          sizeof(config.serverName));
+  strlcpy(config.alerttopic,                  // <- destination
+          cfg["alerttopic"] | "alert",  // <- source
+          sizeof(config.alerttopic));
+  strlcpy(config.wifissid,                  // <- destination
+          cfg["wifi"]["ssid"] | "WifiLan",  // <- source
+          sizeof(config.wifissid));
+  strlcpy(config.wifiuid,                  // <- destination
+          cfg["wifi"]["uid"] | "uid",  // <- source
+          sizeof(config.wifiuid));
+  strlcpy(config.wifipw,                  // <- destination
+          cfg["wifi"]["pw"] | "paswd",  // <- source
+          sizeof(config.wifipw));
+  strlcpy(config.mqttserver,                  // <- destination
+          cfg["mqtt"]["server"] | "10.0.0.55",  // <- source
+          sizeof(config.mqttserver));
+  strlcpy(config.mqttuser,                  // <- destination
+          cfg["mqtt"]["user"] | "DEV001",  // <- source
+          sizeof(config.mqttuser));
+  strlcpy(config.mqttpw,                  // <- destination
+          cfg["mqtt"]["pw"] | "pass",  // <- source
+          sizeof(config.mqttpw));
+  strlcpy(config.mqttcmd,                  // <- destination
+          cfg["mqtt"]["cmd"] | "pass",  // <- source
+          sizeof(config.mqttcmd));
+    strlcpy(config.ftpuser,                  // <- destination
+          cfg["ftp"]["user"] | "DEV001",  // <- source
+          sizeof(config.ftpuser)); 
+    strlcpy(config.ftppw,                  // <- destination
+          cfg["ftp"]["pw"] | "pass",  // <- source
+          sizeof(config.ftppw));            
+  strlcpy(config.pincode,                  // <- destination
+          cfg["gsm"]["pincode"] | "10.0.0.55",  // <- source
+          sizeof(config.pincode));
+  strlcpy(config.destination,                  // <- destination
+          cfg["gsm"]["destinataire"] | "10.0.0.55",  // <- source
+          sizeof(config.destination));
+/*
+               Device specific data load to be tuned together with the config declarations
+*/
+  configFile.close();
+  return true;
+}
+/*
+   Processing MQTT commands if needed
+*/
+void callback(char* topic, byte* payload, unsigned int length) {
+  char cpayload[10];
+  char ctopic[35];
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  payload[length] = '\0';
+  strlcpy(cpayload, (char *)payload, sizeof(cpayload));
+  strlcpy(ctopic, topic, sizeof(ctopic));
+  Serial.print("payload=");
+  Serial.println(cpayload);
+  if (strcmp(config.mqttcmd, ctopic) == 0) {
+      Serial.print("system request received");
+      if (strcmp(cpayload, "REBOOT") == 0) {
+          Serial.println("reboot requested");
+          ESP.restart();
+      }
+  }
+}
 
 void setup()
 {
+    if (!SPIFFS.begin()) {
+    Serial.println ("failed to mount FS");
+    return;
+  }
+  if (!loadConfig()) {
+    Serial.println("Failed to load config");
+  } else {
+    Serial.println("Config loaded");
+  }
+
   pinMode(LED_BLUE, OUTPUT);
   pinMode(SIM800L_POWER, OUTPUT);
 
@@ -77,13 +257,24 @@ void setup()
   sim800lSerial->print("AT+CNMI=2,1\r\n");
 
   Serial.println("GSM SIM800L Ready");
-   char destination[32] ="+32476417968";
+
   sim800l.sendSMS(destination, "le systeme est pret");
+  setup_wifi();
+  Serial.println(config.mqttserver);
+  client.setServer(config.mqttserver, 1883);
+  client.setCallback(callback);
+     //setup FTP service 
+  ftpSrv.begin("esp32","esp32");    
+
 }
 
 
 void loop()
 {
+  // reconnect to mqtt if needed
+  if (!client.connected()) {
+    reconnect();
+  }
   if (millis() - prevMillis > interval) {
     ledState = !ledState;
     digitalWrite(LED_BLUE, ledState);
@@ -149,4 +340,6 @@ void loop()
     }
   }
 }
+ftpSrv.handleFTP();
+client.loop();
 }
