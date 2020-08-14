@@ -1,3 +1,11 @@
+
+/* SMS-Alert module
+*interaction avec le système par SMS : 
+*    - envoi d'SMS d'alerte qui sont générés par les différents composants sur le topic MQTT alert/<composant>/
+*    - reception d'SMS de query ou de commande 
+*
+*
+*/
 #include <Arduino.h>
 #include "Adafruit_FONA.h"
 
