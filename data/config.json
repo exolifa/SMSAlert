@@ -1,6 +1,10 @@
 {
     "devname" : "smsalert001",
-    "alerttopic": "alert",
+    "alertcount": 2,
+    "alerttopics": [
+        {"topic": "alert"},
+        {"topic":"atoq"}
+    ],
     "wifi":{
             "ssid": "VOO-012485",
             "uid": "",
@@ -14,7 +18,17 @@
     },
     "gsm":{
         "pincode": "1111",
-        "destinataire": "+32483207089"
+        "destcount": 2,
+        "destinataires":[
+            {
+                "mnemo" :"daniel",
+                "numero":"+32483207089"
+            },
+            {
+                "mnemo" :"christiane",
+                "numero":"+32476316908"
+            }
+        ] 
     },
     "ftp":{
         "ftpuser":"esp8266",

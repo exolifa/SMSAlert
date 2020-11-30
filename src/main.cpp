@@ -27,9 +27,18 @@
 HardwareSerial *sim800lSerial = &Serial1;
 // initialisation de la librairie FONA - client GSM
 Adafruit_FONA sim800l = Adafruit_FONA(SIM800L_PWRKEY);
+struct Destinataire{
+  char mnemo[15];
+  char numero[32];
+};
+struct Alerttopic{
+  char topic[35];
+};
 struct Config {
   char serverName[15] ;
-  char alerttopic[35] ;
+  int alerttopicscount ;
+  int destinatairescount;
+  Alerttopic alerttopic[10] ;
   char wifissid [20];
   char wifiuid[10];
   char wifipw[25] ;
@@ -40,7 +49,7 @@ struct Config {
   char ftpuser [15];
   char ftppw [15];  
   char pincode[5];
-  char destination[32];
+  Destinataire destination [10];
 };
 Config config; 
 
@@ -64,6 +73,14 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 FtpServer ftpSrv;
 
+String findNumero (String mnemo ){
+  for (int i = 0; i < config.destinatairescount; i++){
+    if (mnemo = config.destination[i].mnemo) {
+      return config.destination[i].numero;
+    }
+  }
+  return mnemo;
+}
 void setup_wifi() {
  // WiFi.hostname( "smsalert");
   delay(100);
@@ -142,9 +159,6 @@ bool loadConfig() {
   strlcpy(config.serverName,                  // <- destination
           cfg["devname"] | "DEV001",  // <- source
           sizeof(config.serverName));
-  strlcpy(config.alerttopic,                  // <- destination
-          cfg["alerttopic"] | "alert",  // <- source
-          sizeof(config.alerttopic));
   strlcpy(config.wifissid,                  // <- destination
           cfg["wifi"]["ssid"] | "WifiLan",  // <- source
           sizeof(config.wifissid));
@@ -175,9 +189,23 @@ bool loadConfig() {
   strlcpy(config.pincode,                  // <- destination
           cfg["gsm"]["pincode"] | "10.0.0.55",  // <- source
           sizeof(config.pincode));
-  strlcpy(config.destination,                  // <- destination
-          cfg["gsm"]["destinataire"] | "10.0.0.55",  // <- source
-          sizeof(config.destination));
+  config.alerttopicscount = cfg["alertcount"].as<int>();
+  for ( int i = 0; i < config.alerttopicscount; i++)
+  {  
+   strlcpy(config.alerttopic[i].topic,                  // <- destination
+          cfg["alerttopics"][i]["topic"] | "alert",  // <- source
+          sizeof(config.alerttopic[i].topic));
+  }
+   config.destinatairescount = cfg["destcount"].as<int>();     
+   for ( int i = 0; i < config.destinatairescount; i++)
+  { 
+  strlcpy(config.destination[i].mnemo,                  // <- destination
+          cfg["gsm"]["destinataires"][i]["mnemo"] | "10.0.0.55",  // <- source
+          sizeof(config.destination[i].mnemo));
+  strlcpy(config.destination[i].numero,                  // <- destination
+          cfg["gsm"]["destinataires"][i]["numero"] | "10.0.0.55",  // <- source
+          sizeof(config.destination[i].numero));
+  }
 /*
                Device specific data load to be tuned together with the config declarations
 */
@@ -258,7 +286,7 @@ void setup()
 
   Serial.println("GSM SIM800L Ready");
 
-  sim800l.sendSMS(destination, "le systeme est pret");
+  sim800l.sendSMS(config.destination[0].numero, "le systeme SMS vient de démarrer");
   setup_wifi();
   Serial.println(config.mqttserver);
   client.setServer(config.mqttserver, 1883);
